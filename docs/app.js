@@ -6,6 +6,7 @@ const ALL = SHORT.concat(['2', '3', '4', '5', '6', '7', '8']);
 const QN = { '1a': '1א · שאלה קצרה', '1b': '1ב · שאלה קצרה', '1c': '1ג · שאלה קצרה', '1d': '1ד · שאלה קצרה', '2': '2 · סדרות', '3': '3 · הסתברות', '4': '4 · גאומטריה', '5': '5 · טריגו במישור', '6': '6 · חקירה', '7': '7 · חקירה', '8': '8 · בעיית קיצון' };
 const SN = { '1a': '1א', '1b': '1ב', '1c': '1ג', '1d': '1ד' };
 const TC = { '1a': '#14B8A6', '1b': '#06B6D4', '1c': '#0EA5E9', '1d': '#3B82F6', '2': '#6366F1', '3': '#8B5CF6', '4': '#D946EF', '5': '#EC4899', '6': '#F97316', '7': '#F59E0B', '8': '#EF4444' };
+QN.short = 'שאלות קצרות (1א–1ד)'; TC.short = '#0EA5E9';
 const sn = k => SN[k] || k, tc = k => TC[k] || 'var(--pri)';
 const EX = Object.fromEntries(CATALOG.map(e => [e.id, e]));
 const IC = {
@@ -26,7 +27,7 @@ const save = k => kv.set(k, S[k]).catch(() => toast('השמירה נכשלה'));
 /* ---------- stats / catalog logic (same as Catalog.kt) ---------- */
 const pr = (e, k) => S.progress[e + '|' + k];
 const isDone = (e, k) => !!(pr(e, k) && pr(e, k).done);
-function counts(exams, only) { let d = 0, t = 0; for (const e of exams) for (const k of e.keys) { if (only && k !== only) continue; t++; if (isDone(e.id, k)) d++; } return [d, t]; }
+function counts(exams, only) { let d = 0, t = 0; for (const e of exams) for (const k of e.keys) { if (only && (Array.isArray(only) ? !only.includes(k) : k !== only)) continue; t++; if (isDone(e.id, k)) d++; } return [d, t]; }
 const pct = (exams, only) => { const [d, t] = counts(exams, only); return t ? Math.floor(d * 100 / t) : 0; };
 const remaining = e => e.keys.filter(k => !isDone(e.id, k));
 function pageFor(e, ref, k) {
@@ -93,14 +94,14 @@ function installBanner() {
 function homeRender() {
   const sc = $('.scroll', home), st = sc ? sc.scrollTop : 0;
   const [da, ta] = counts(CATALOG), pa = pct(CATALOG), src = SOURCES[S.tab], exams = CATALOG.filter(e => e.source === src);
-  const keys = ALL.filter(k => exams.some(e => e.keys.includes(k)));
+  const keys = ['short'].concat(ALL.filter(k => !SHORT.includes(k))).filter(k => exams.some(e => e.keys.some(x => k === 'short' ? SHORT.includes(x) : x === k)));
   home.innerHTML = `<div class="scroll">
   <div class="hero"><div class="row"><h1>מעקב בגרויות 571</h1><button class="ib" data-a="settings" aria-label="הגדרות">${IC.gear}</button></div>
   <div class="big">${ring(pa, 104, 11, '#fff', 'rgba(255,255,255,.25)', pa + '%')}<div><div class="dim">התקדמות כללית</div><b dir="ltr">${da} / ${ta}</b><div class="dim">שאלות · נותרו ${ta - da}</div></div></div></div>
   ${installBanner()}
   <div class="seg">${SOURCES.map((s, i) => `<button class="${S.tab === i ? 'on' : ''}" data-a="tab" data-v="${i}">${s}<small>${pct(CATALOG.filter(e => e.source === s))}%</small></button>`).join('')}</div>
   <div style="margin-top:6px"><h2>סוגי שאלות · ${src}</h2><div class="sub">לחץ על סוג שאלה כדי לראות את ההשלמות שלך בו</div></div>
-  ${keys.map(k => { const [d, t] = counts(exams, k), p = pct(exams, k); return `<button class="card" data-a="type" data-k="${k}" data-s="${src}"><div class="flex"><span class="dot" style="background:${tc(k)}"></span><span class="ttl grow">${QN[k]}</span><b style="color:${tc(k)}">${p}%</b></div>${pbar(p, tc(k))}<div class="xs">${d} מתוך ${t} הושלמו</div></button>`; }).join('')}
+  ${keys.map(k => { const kq = k === 'short' ? SHORT : k, [d, t] = counts(exams, kq), p = pct(exams, kq); return `<button class="card" data-a="type" data-k="${k}" data-s="${src}"><div class="flex"><span class="dot" style="background:${tc(k)}"></span><span class="ttl grow">${QN[k]}</span><b style="color:${tc(k)}">${p}%</b></div>${pbar(p, tc(k))}<div class="xs">${d} מתוך ${t} הושלמו</div></button>`; }).join('')}
   <div style="margin-top:10px"><h2>המבחנים</h2><div class="sub">לחץ על האחוז כדי לראות מה נותר במבחן</div></div>
   ${exams.map(e => { const [d, t] = counts([e]), p = pct([e]), ok = d === t; return `<div class="card" role="button" data-a="exam" data-e="${e.id}"><div class="flex"><div class="grow"><div class="ttl">${esc(e.title)}</div>${pbar(p, ok ? 'var(--sec)' : 'var(--pri)')}<div class="xs">${d} מתוך ${t} שאלות</div></div><div class="badge ${ok ? 'ok' : ''}" ${ok ? '' : `data-a="rem" data-e="${e.id}"`}>${ok ? '✓' : p + '%'}${ok ? '' : `<small>נותרו ${t - d}</small>`}</div></div></div>`; }).join('')}
   </div>`;
@@ -155,16 +156,19 @@ async function importBackup(f) {
 
 /* ---------- TYPE screen ---------- */
 function typeScreen(k, src) {
-  const exams = CATALOG.filter(e => e.source === src && e.keys.includes(k));
   push('', (el, L) => {
-    const [d, t] = counts(exams, k), p = pct(exams, k), f = L.f || 0, c = tc(k);
-    const shown = exams.filter(e => { const dn = isDone(e.id, k); return f === 1 ? !dn : f === 2 ? dn : true; });
+    const grp = k === 'short', kk = grp ? (L.sub || SHORT.find(x => CATALOG.some(e => e.source === src && e.keys.includes(x)))) : k;
+    const exams = CATALOG.filter(e => e.source === src && e.keys.includes(kk));
+    const [d, t] = counts(exams, kk), p = pct(exams, kk), f = L.f || 0, c = tc(kk);
+    const shown = exams.filter(e => { const dn = isDone(e.id, kk); return f === 1 ? !dn : f === 2 ? dn : true; });
+    const [gd, gt] = grp ? counts(CATALOG.filter(e => e.source === src), SHORT) : [0, 0];
     const sc = $('.scroll', el), st = sc ? sc.scrollTop : 0;
-    el.innerHTML = topBar(QN[k], src) + `<div class="scroll">
+    el.innerHTML = topBar(grp ? 'שאלות קצרות' : QN[k], src + (grp ? ` · ${gd} מתוך ${gt} הושלמו` : '')) + `<div class="scroll">
+    ${grp ? `<div class="seg">${SHORT.filter(x => CATALOG.some(e => e.source === src && e.keys.includes(x))).map(x => `<button class="${x === kk ? 'on' : ''}" data-a="tsub" data-v="${x}">שאלה ${sn(x)}<small>${pct(CATALOG.filter(e => e.source === src), x)}%</small></button>`).join('')}</div>` : ''}
     <div class="card big"><div class="flex" style="gap:16px"><span data-a="tf" data-v="1" role="button" style="border-radius:50%">${ring(p, 88, 10, c, 'var(--sv)', p + '%')}</span><div><div class="ttl">${d} מתוך ${t} מבחנים הושלמו</div><div class="sub">${t - d === 0 ? 'סיימת את כולם 🎉' : 'לחץ על האחוז כדי לראות את ' + (t - d) + ' שנותרו'}</div></div></div></div>
     <div class="flex" style="gap:8px">${pill(`הכל (${t})`, f === 0, 'tf', 0)}${pill(`נותרו (${t - d})`, f === 1, 'tf', 1)}${pill(`הושלמו (${d})`, f === 2, 'tf', 2)}</div>
     ${shown.length ? '' : `<div class="empty">${f === 1 ? 'אין שאלות שנותרו 🎉' : 'עדיין אין כאן שאלות'}</div>`}
-    ${shown.map(e => { const q = pr(e.id, k), dn = !!(q && q.done), ex = [q && q.img ? 'יש תמונה' : '', q && q.note && q.note.trim() ? 'יש הערה' : ''].filter(Boolean).join(' · '); return `<div class="card ${dn ? 'done' : ''}" role="button" data-a="q" data-e="${e.id}" data-k="${k}"><div class="flex"><div class="grow"><div class="ttl">${esc(e.title)}</div>${ex ? `<div class="sub">${ex}</div>` : ''}</div>${doneBtn(e.id, k, dn)}</div></div>`; }).join('')}</div>`;
+    ${shown.map(e => { const q = pr(e.id, kk), dn = !!(q && q.done), ex = [q && q.img ? 'יש תמונה' : '', q && q.note && q.note.trim() ? 'יש הערה' : ''].filter(Boolean).join(' · '); return `<div class="card ${dn ? 'done' : ''}" role="button" data-a="q" data-e="${e.id}" data-k="${kk}"><div class="flex"><div class="grow"><div class="ttl">${esc(e.title)}</div>${ex ? `<div class="sub">${ex}</div>` : ''}</div>${doneBtn(e.id, kk, dn)}</div></div>`; }).join('')}</div>`;
     const n = $('.scroll', el); if (n) n.scrollTop = st;
   });
 }
@@ -352,6 +356,7 @@ const A = {
   settings: settingsDialog,
   tog: d => toggle(d.e, d.k),
   q: d => openQ(EX[d.e], d.k),
+  tsub: d => { const L = topL(); L.sub = d.v; L.f = 0; L.render(); },
   tf: d => { const L = topL(); L.f = +d.v; L.render(); },
   ef: d => { const L = topL(); L.left = !!+d.v; L.render(); },
   link: () => { const e = topL().exam; openUrl(S.links[e.id] || e.defaultUrl || 'https://www.google.com/search?q=' + encodeURIComponent('שאלון ' + e.title + ' מתמטיקה 5 יחידות 571')); },
