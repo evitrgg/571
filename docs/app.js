@@ -223,7 +223,17 @@ function savePage(e, k, page, ref) {
 /* ---------- pinch / pan / double-tap ---------- */
 function zoomable(stage, getEl, max) {
   const pts = new Map(); const Z = { s: 1, x: 0, y: 0 }; let g = null, lastTap = 0;
-  const apply = () => { const el = getEl(); if (el) el.style.transform = `translate(${Z.x}px,${Z.y}px) scale(${Z.s})`; };
+  const clamp = () => {
+    if (Z.s <= 1) { Z.s = 1; Z.x = 0; Z.y = 0; return; }
+    const el = getEl(), sr = stage.getBoundingClientRect();
+    const bw = el ? el.getBoundingClientRect().width : sr.width;
+    const bh = el ? el.getBoundingClientRect().height : sr.height;
+    const mx = Math.max(80, (bw + sr.width) * 0.45);
+    const my = Math.max(80, (bh + sr.height) * 0.45);
+    Z.x = Math.max(-mx, Math.min(mx, Z.x));
+    Z.y = Math.max(-my, Math.min(my, Z.y));
+  };
+  const apply = () => { clamp(); const el = getEl(); if (el) el.style.transform = `translate(${Z.x}px,${Z.y}px) scale(${Z.s})`; };
   const info = () => { const a = [...pts.values()]; const cx = a.reduce((m, p) => m + p.x, 0) / a.length, cy = a.reduce((m, p) => m + p.y, 0) / a.length; const d = a.length > 1 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; return { cx, cy, d }; };
   stage.addEventListener('pointerdown', ev => { if (ev.target.closest('button')) return; stage.setPointerCapture(ev.pointerId); pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY }); const i = info(); g = { ...i, s: Z.s, moved: 0, t: Date.now(), n: pts.size }; });
   stage.addEventListener('pointermove', ev => {
@@ -231,9 +241,15 @@ function zoomable(stage, getEl, max) {
     const i = info(); g.moved += Math.abs(i.cx - g.cx) + Math.abs(i.cy - g.cy);
     if (pts.size > 1 && g.d) Z.s = Math.min(max, Math.max(1, g.s * i.d / g.d));
     Z.x += i.cx - g.cx; Z.y += i.cy - g.cy; g.cx = i.cx; g.cy = i.cy;
-    if (Z.s === 1) { Z.x = 0; Z.y = 0; } else { const el = getEl(); const w = (el ? el.clientWidth : 300) * Z.s / 2, h = (el ? el.clientHeight : 300) * Z.s / 2; Z.x = Math.max(-w, Math.min(w, Z.x)); Z.y = Math.max(-h, Math.min(h, Z.y)); }
     apply();
   });
+  stage.addEventListener('wheel', ev => {
+    ev.preventDefault();
+    const factor = ev.deltaY < 0 ? 1.18 : 0.85;
+    Z.s = Math.min(max, Math.max(1, Z.s * factor));
+    if (Z.s === 1) { Z.x = 0; Z.y = 0; }
+    apply();
+  }, { passive: false });
   const up = ev => {
     if (!pts.has(ev.pointerId)) return; pts.delete(ev.pointerId);
     if (g && g.n === 1 && g.moved < 8 && Date.now() - g.t < 300) { const n = Date.now(); if (n - lastTap < 320) { if (Z.s > 1) { Z.s = 1; Z.x = Z.y = 0; } else Z.s = Math.min(max, 2.5); apply(); lastTap = 0; } else lastTap = n; }
