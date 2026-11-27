@@ -1,127 +1,59 @@
 @media (min-width: 768px) {
-  html,
   body {
     background: var(--bg);
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  #root {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--bg);
-  }
-
-  .layer {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
   }
 
   .scroll {
+    max-width: 960px;
     width: 100%;
-    max-width: 1280px;
     margin: 0 auto;
-    padding: 20px 32px 36px;
-    gap: 14px;
-    scrollbar-width: thin;
-  }
-
-  #root > .layer:first-child .scroll {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: start;
-    gap: 14px;
-  }
-
-  #root > .layer:first-child .scroll > .hero,
-  #root > .layer:first-child .scroll > .install,
-  #root > .layer:first-child .scroll > .seg,
-  #root > .layer:first-child .scroll > div:not(.card) {
-    grid-column: 1 / -1;
+    padding: 20px 28px 40px;
+    gap: 12px;
   }
 
   .hero {
-    margin: -20px -32px 6px;
+    margin: -20px -28px 8px;
     padding: 24px 32px;
     border-radius: 0 0 28px 28px;
   }
 
-  .bar {
-    width: 100%;
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 10px 24px;
-  }
-
-  .pills {
-    width: 100%;
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 6px 24px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .card {
-    padding: 16px 20px;
-  }
-
-  .card:hover {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
-  }
-
-  /* תצוגת תרגיל (PDF): נכנסת נקי ומלא בתוך המסך בלי לגלגל מסביב */
-  .stage {
-    flex: 1 1 auto;
-    min-height: 0;
-    width: 100%;
-    max-width: 1280px;
-    margin: 4px auto 0 !important;
-    padding: 8px 16px;
-    overflow: hidden;
-  }
-
-  .stage canvas {
-    display: block;
-    width: auto !important;
-    height: auto !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    object-fit: contain;
-    border-radius: 10px;
-  }
-
+  .bar,
+  .pills,
   .hint {
+    max-width: 960px;
     width: 100%;
-    max-width: 1280px;
-    margin: 0 auto;
-    text-align: center;
-    padding: 2px 16px;
+    margin-inline: auto;
   }
 
   .vctl,
   .vfoot {
+    max-width: 760px;
     width: 100%;
-    max-width: 920px;
-    margin: 0 auto;
-    padding-inline: 16px;
+    margin-inline: auto;
+  }
+
+  /* גלילה רגילה ב-PDF ללא נעילת זום בגלגלת */
+  .stage {
+    overflow: auto !important;
+    touch-action: pan-x pan-y !important;
+    padding: 16px;
+  }
+
+  .stage canvas {
+    max-width: 100% !important;
+    max-height: none !important;
+    width: auto !important;
+    height: auto !important;
   }
 
   .dlg {
-    max-width: 520px;
+    max-width: 480px;
     width: 100%;
     margin: auto;
   }
 
   .sheet {
-    max-width: 720px;
+    max-width: 640px;
     width: 100%;
     margin: 0 auto;
   }
