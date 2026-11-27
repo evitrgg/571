@@ -118,6 +118,20 @@ function remainingSheet(e) {
   L.render();
 }
 
+
+
+// בתוך ה-viewer ב-app.js — אחרי עדכון העמוד הנוכחי (נגיד curPage = p) וטעינת העמוד:
+function syncQuestionToPage(pageNum, ref, exam, V, ui, load) {
+  if (V.showAns || !ref || !ref.pages || !Array.isArray(exam.keys)) return;
+  const matchKey = exam.keys.find(k => k !== V.key && Number(pageFor(exam, ref, k)) === Number(pageNum));
+  if (matchKey) {
+    V.key = matchKey;
+    V.page = Number(pageNum);
+    ui();
+  }
+}
+
+
 /* ---------- settings ---------- */
 function settingsDialog() {
   const s = S.settings;
@@ -448,28 +462,7 @@ function zoomImg(id) {
   }, { refresh() { } });
 }
 
-/* ---------- actions (event delegation) ---------- */
-const A = {
-  back: () => history.back(),
-  tab: d => { S.tab = +d.v; localStorage.setItem('tab', d.v); homeRender(); },
-  type: d => typeScreen(d.k, d.s),
-  exam: d => examScreen(EX[d.e]),
-  rem: d => remainingSheet(EX[d.e]),
-  pickRem: d => { const e = EX[d.e]; popTop(); replaceNext = true; openQ(e, d.k); },
-  settings: settingsDialog,
-  tog: d => toggle(d.e, d.k),
-  q: d => openQ(EX[d.e], d.k),
-  tsub: d => { const L = topL(); L.sub = d.v; L.f = 0; L.render(); },
-  tf: d => { const L = topL(); L.f = +d.v; L.render(); },
-  ef: d => { const L = topL(); L.left = !!+d.v; L.render(); },
-  link: () => { const e = topL().exam; openUrl(S.links[e.id] || e.defaultUrl || 'https://www.google.com/search?q=' + encodeURIComponent('שאלון ' + e.title + ' מתמטיקה 5 יחידות 571')); },
-  sol: () => { const e = topL().exam; openUrl(solutionFor(e) || solSearch(e)); },
-  editLinks: () => editLinks(topL().exam),
-  install: installApp, noinst: () => { localStorage.setItem('noInstall', '1'); homeRender(); },
-  /* viewer */
-  vAns: () => { const L = viewer_(); L.V.showAns = !L.V.showAns; L.ui(); L.load(); },
-  vKey: d => { const L = viewer_(); L.setKey(d.v); L.ui(); L.load(); const b = $('#vch .on', L.el); b && b.scrollIntoView({ inline: 'center', block: 'nearest' }); },
-  vPrev: () => vStep(-1), vNext: () => vStep(1),
+vPrev: () => vStep(-1), vNext: () => vStep(1),
   vCrop: () => { const L = viewer_(); L.V.crop = !L.V.crop; L.ui(); L.load(); },
   vSave: () => { const L = viewer_(); savePage(L.exam, L.V.key, L.V.page, L.ref); },
   vDone: () => { const L = viewer_(); toggle(L.exam.id, L.V.key); },
@@ -480,7 +473,7 @@ const A = {
   vWeb: () => openUrl(new URL(pdfUrl(viewer_().ref), location.href).href),
   vJump: () => { const L = viewer_(), V = L.V; const shown = V.showAns ? V.aPage : V.page;
     dialog('מעבר לעמוד', `<label class="fld">${L.ref.url == null ? 'מספר העמוד המודפס' : 'מספר עמוד'}<input id="jp" class="h" inputmode="numeric" value="${shown}"></label>`, [['עבור', el => {
-      const n = parseInt($('#jp', el).value); if (!isNaN(n)) { if (V.showAns && L.ansLo != null) V.aPage = Math.min(L.ansHi, Math.max(L.ansLo, n)); else { const t = V.doc ? V.doc.numPages - L.lim().sh : Infinity; V.page = Math.min(t, Math.max(1, n)); } }
+      const n = parseInt($('#jp', el).value); if (!isNaN(n)) { if (V.showAns && L.ansLo != null) V.aPage = Math.min(L.ansHi, Math.max(L.ansLo, n)); else { const t = V.doc ? V.doc.numPages - L.lim().sh : Infinity; V.page = Math.min(t, Math.max(1, n)); syncQuestionByPage(L); } }
       setTimeout(() => { L.ui(); L.load(); }, 0);
     }], ['ביטול']], el => { const i = $('#jp', el); setTimeout(() => { i.focus(); i.select(); }, 280); }); },
   /* details */
@@ -490,7 +483,21 @@ const A = {
   zoomImg: d => zoomImg(d.v)
 };
 function viewer_() { for (let i = stack.length - 1; i >= 0; i--) if (stack[i].viewer) return stack[i]; }
-function vStep(dlt) { const L = viewer_(), V = L.V; if (V.showAns) V.aPage += dlt; else V.page += dlt; L.ui(); L.load(); }
+function syncQuestionByPage(L) {
+  if (!L || !L.V || L.V.showAns || !L.exam || !L.ref) return;
+  const match = L.exam.keys.find(k => Number(pageFor(L.exam, L.ref, k)) === Number(L.V.page));
+  if (match && match !== L.V.key) {
+    L.V.key = match;
+    const b = $('#vch .on', L.el);
+    b && b.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
+}
+function vStep(dlt) {
+  const L = viewer_(), V = L.V;
+  if (V.showAns) V.aPage += dlt;
+  else { V.page += dlt; syncQuestionByPage(L); }
+  L.ui(); L.load();
+}
 document.addEventListener('click', ev => {
   const t = ev.target.closest('[data-a]'); if (!t || !A[t.dataset.a]) return;
   ev.preventDefault(); A[t.dataset.a](t.dataset, ev);
@@ -499,7 +506,6 @@ addEventListener('keydown', ev => { if (ev.key === 'Escape' && stack.length) his
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => { if (!/INPUT|TEXTAREA/.test(e.target.tagName)) e.preventDefault(); });
 document.addEventListener('dblclick', e => e.preventDefault());
-
 /* ---------- boot ---------- */
 (async function boot() {
   try {
