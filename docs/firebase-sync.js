@@ -1,4 +1,4 @@
-// firebase-sync.js — סנכרון התקדמות לפי קוד (ללא כפתור צף) מול IndexedDB ('bagrut' / 'kv' / 'progress')
+// firebase-sync.js — סנכרון התקדמות לפי קוד מול IndexedDB ('bagrut' / 'kv' / 'progress')
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
@@ -17,7 +17,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// הסרת אלמנטים ישנים של כפתורים צפים אם קיימים
 for (const oldId of ["bg-badge", "bg-panel", "bg-admin", "bg-code-sync", "bg-code-badge"]) {
   const el = document.getElementById(oldId);
   if (el) el.remove();
@@ -31,7 +30,6 @@ const CODE_KEY = "bagrut_sync_code";
 let currentCode = (localStorage.getItem(CODE_KEY) || "").trim().toUpperCase();
 let unsub = null;
 let applyingRemote = false;
-let lastSig = "";
 
 function notify(msg) {
   if (typeof window.toast === "function") window.toast(msg);
@@ -67,13 +65,6 @@ async function writeProgress(map) {
   });
 }
 
-function getDoneMap(progressMap) {
-  const done = {};
-  for (const [k, v] of Object.entries(progressMap || {})) {
-    if (v && v.done) done[k] = true;
-  }
-  return done;
-}
 // ---- state = { key: { done: bool, ts: ms } } ; הרשומה העדכנית (ts) מנצחת ----
 function getStateMap(progressMap) {
   const st = {};
@@ -82,12 +73,16 @@ function getStateMap(progressMap) {
   }
   return st;
 }
+
 function readCloud(data) {
   if (data.state) return data.state;
-  const st = {};                                   // תאימות לאחור לנתונים ישנים
-  for (const k of Object.keys(data.done || {})) if (data.done[k]) st[k] = { done: true, ts: 0 };
+  const st = {};
+  for (const k of Object.keys(data.done || {})) {
+    if (data.done[k]) st[k] = { done: true, ts: 0 };
+  }
   return st;
 }
+
 function mergeState(a, b) {
   const out = { ...(a || {}) };
   for (const [k, v] of Object.entries(b || {})) {
@@ -96,6 +91,7 @@ function mergeState(a, b) {
   }
   return out;
 }
+
 function applyState(state, baseMap) {
   const next = { ...(baseMap || {}) };
   for (const [k, v] of Object.entries(state)) {
@@ -104,7 +100,9 @@ function applyState(state, baseMap) {
   }
   return next;
 }
-const sigOf = st => Object.keys(st || {}).sort().map(k => k + ":" + (st[k].done ? 1 : 0) + ":" + st[k].ts).join("|");
+
+const sigOf = st =>
+  Object.keys(st || {}).sort().map(k => k + ":" + (st[k].done ? 1 : 0) + ":" + st[k].ts).join("|");
 const countDone = st => Object.values(st).filter(v => v.done).length;
 
 async function currentProgress() {
@@ -126,10 +124,14 @@ async function reconcile(ref, code, localMap, localState, cloudState) {
       const m = applyState(merged, localMap);
       await writeProgress(m);
       applyToUI(m);
-    } finally { applyingRemote = false; }
+    } finally {
+      applyingRemote = false;
+    }
   }
   if (s !== sigOf(cloudState)) {
-    await setDoc(ref, { code, state: merged, doneCount: countDone(merged), updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(ref, {
+      code, state: merged, doneCount: countDone(merged), updatedAt: serverTimestamp(),
+    }, { merge: true });
   }
   return merged;
 }
@@ -170,7 +172,9 @@ function connectCode(rawCode, showStatus = false) {
     try {
       const localMap = await currentProgress();
       await reconcile(ref, clean, localMap, getStateMap(localMap), readCloud(snap.data()));
-    } catch (e) { console.warn("snapshot sync failed:", e); }
+    } catch (e) {
+      console.warn("snapshot sync failed:", e);
+    }
   }, (err) => console.warn("onSnapshot error:", err));
 }
 
@@ -182,19 +186,7 @@ window.addEventListener("bagrut-local-progress-changed", () => {
 });
 
 window.addEventListener("bagrut-set-sync-code", (e) => connectCode(e.detail || "", true));
+
 window.getBagrutSyncCode = () => currentCode;
 
 if (currentCode) connectCode(currentCode, false);
-  if (!currentCode || applyingRemote) return;
-  syncNow(false);
-});
-
-window.addEventListener("bagrut-set-sync-code", (e) => {
-  connectCode(e.detail || "", true);
-});
-
-window.getBagrutSyncCode = () => currentCode;
-
-if (currentCode) {
-  connectCode(currentCode, false);
-}
