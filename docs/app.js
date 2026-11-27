@@ -119,22 +119,107 @@ function remainingSheet(e) {
 }
 
 /* ---------- settings ---------- */
+/* ---------- settings + hidden admin tools ---------- */
 function settingsDialog() {
   const s = S.settings;
+  const syncCode = localStorage.getItem('syncCode') || '';
   const applySet = el => { const u = $('#su', el).value.trim(); S.settings = { goolUrl: u || GOOL_URL, offset: parseInt($('#so', el).value) || 4 }; save('settings'); refresh(); };
   dialog('קובץ השאלות (PDF)', `
-  <label class="fld">קישור ל-PDF של שאלון 571<textarea id="su" rows="3" style="min-height:70px;direction:ltr;text-align:left">${esc(s.goolUrl)}</textarea></label>
+  <div style="background:var(--sv);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div style="font-weight:600;font-size:14px">סנכרון בין מכשירים (טלפון ↔ מחשב)</div>
+    <div class="sub">הזן אותו קוד בטלפון ובמחשב כדי לשמור ולסנכרן את ההתקדמות ביניהם</div>
+    <div class="flex" style="gap:6px">
+      <input id="scode" value="${esc(syncCode)}" placeholder="קוד אישי (למשל 571-ABCD)" style="flex:1;border:1.5px solid var(--out);border-radius:10px;padding:8px 10px;direction:ltr;text-align:left;background:var(--sur)">
+      <button class="btn" id="ssync" style="padding:8px 14px;font-size:14px">חבר</button>
+    </div>
+  </div>
+  <label class="fld">קישור ל-PDF של שאלון 571<textarea id="su" rows="2" style="min-height:54px;direction:ltr;text-align:left">${esc(s.goolUrl)}</textarea></label>
   <label class="fld">דפים לפני עמוד מס' 1 (כריכה + מבוא + תוכן = 4)<input id="so" class="h" inputmode="numeric" value="${s.offset}"></label>
   <div class="acts" style="flex-direction:column;align-items:stretch">
    <button class="btn tx" id="sre">שמור והורד מחדש</button><button class="btn tx" id="spk">בחר קובץ PDF מהמכשיר</button>
    <button class="btn tx" id="sex">גיבוי: ייצוא ההתקדמות לקובץ</button><button class="btn tx" id="sim">שחזור מקובץ גיבוי</button>
-   ${deferredInstall ? '<button class="btn tx" id="sin">התקן את האפליקציה</button>' : ''}</div>`,
+   ${deferredInstall ? '<button class="btn tx" id="sin">התקן את האפליקציה</button>' : ''}</div>
+  <div id="adminBox" style="display:none;border-top:1.5px dashed var(--out);padding-top:10px;margin-top:4px;flex-direction:column;gap:6px">
+    <div style="font-size:12px;font-weight:700;color:var(--pri)">כלים מתקדמים (מוסתר)</div>
+    <button class="btn ol" id="scsvEx">ייצוא טבלת Excel (בגרויות בלבד)</button>
+    <button class="btn ol" id="scsvIm">ייבוא התקדמות מטבלת Excel (CSV)</button>
+    <button class="btn tx" id="sstats">צפה בסטטיסטיקות משתמשים כלליות</button>
+  </div>`,
     [['שמור', applySet], ['ביטול']], el => {
+      // 5 לחיצות מהירות על הכותרת פותחות את התפריט המוסתר
+      let taps = 0, tapTimer = null;
+      const h3 = $('h3', el);
+      h3.style.cursor = 'pointer';
+      h3.onclick = () => {
+        taps++;
+        clearTimeout(tapTimer);
+        tapTimer = setTimeout(() => { taps = 0; }, 1500);
+        if (taps >= 5) {
+          $('#adminBox', el).style.display = 'flex';
+          toast('מצב ניהול נפתח');
+        }
+      };
+      $('#ssync', el).onclick = () => {
+        const code = $('#scode', el).value.trim().toUpperCase();
+        if (!code) return toast('הכנס קוד סנכרון');
+        localStorage.setItem('syncCode', code);
+        window.dispatchEvent(new CustomEvent('bagrut:sync-code', { detail: code }));
+        toast('הקוד נשמר ומסונכרן: ' + code);
+      };
       $('#sre', el).onclick = async () => { applySet(el); docs.delete(S.settings.goolUrl); await kv.del('pdf:' + S.settings.goolUrl); history.back(); toast('הקובץ יורד מחדש בפתיחת שאלה'); };
       $('#spk', el).onclick = () => pickFile('application/pdf,.pdf', async f => { applySet(el); await storePdf(S.settings.goolUrl, f); history.back(); toast('הקובץ נשמר במכשיר'); });
       $('#sex', el).onclick = exportBackup; $('#sim', el).onclick = () => pickFile('application/json,.json', importBackup);
+      $('#scsvEx', el).onclick = exportBagrutExcel;
+      $('#scsvIm', el).onclick = () => pickFile('.csv,text/csv', importBagrutExcel);
+      $('#sstats', el).onclick = () => window.dispatchEvent(new CustomEvent('bagrut:show-stats'));
       const si = $('#sin', el); if (si) si.onclick = installApp;
     });
+}
+
+/* ---------- Excel (CSV) Export & Import — בגרויות בלבד ---------- */
+function exportBagrutExcel() {
+  const bagrutExams = CATALOG.filter(e => e.source === 'בגרויות');
+  const rows = [['מזהה_מבחן', 'שם_מבחן', 'מזהה_שאלה', 'שאלה_ונושא', 'בוצע', 'הערה']];
+  for (const e of bagrutExams) {
+    for (const k of e.keys) {
+      const p = pr(e.id, k);
+      const done = p && p.done ? 'כן' : 'לא';
+      const note = (p && p.note ? p.note : '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
+      rows.push([e.id, `"${e.title.replace(/"/g, '""')}"`, k, `"${QN[k]}"`, done, `"${note}"`]);
+    }
+  }
+  const csv = '\uFEFF' + rows.map(r => r.join(',')).join('\r\n');
+  const file = new File([csv], 'bagrut-571-exams.csv', { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  a.click();
+  toast('קובץ Excel (CSV) של הבגרויות ירד');
+}
+
+async function importBagrutExcel(file) {
+  try {
+    const text = (await file.text()).replace(/^\uFEFF/, '');
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    let updated = 0;
+    for (let i = 1; i < lines.length; i++) {
+      // פיצול CSV שתומך במירכאות
+      const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
+      const clean = cols.map(c => c.replace(/^"|"$/g, '').replace(/""/g, '"').trim());
+      const [examId, , qKey, , doneStr, noteStr] = clean;
+      if (!examId || !qKey || !EX[examId]) continue;
+      const isDoneVal = doneStr === 'כן' || doneStr === '1' || doneStr.toLowerCase() === 'true' || doneStr === '✓';
+      const entry = ensure(examId, qKey);
+      entry.done = isDoneVal;
+      if (noteStr !== undefined) entry.note = noteStr;
+      updated++;
+    }
+    await save('progress');
+    refresh();
+    toast(`יובאו ועודכנו ${updated} שורות בהצלחה`);
+  } catch (e) {
+    toast('שגיאה בקריאת קובץ ה-CSV');
+  }
 }
 function installApp() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; refresh(); } }
 async function exportBackup() {
@@ -408,3 +493,5 @@ document.addEventListener('dblclick', e => e.preventDefault());
   homeRender();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
 })();
+
+
