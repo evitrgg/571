@@ -70,18 +70,21 @@
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;
-    overflow: hidden;
-    padding: 10px 24px;
-    display: grid;
-    place-items: center;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 14px 24px 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
   }
 
   .stage canvas {
-    width: auto !important;
+    display: block;
+    width: min(880px, 90vw) !important;
     height: auto !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    object-fit: contain;
+    max-width: none !important;
+    max-height: none !important;
     border-radius: 8px;
   }
 
