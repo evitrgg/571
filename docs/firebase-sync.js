@@ -1,4 +1,4 @@
-// firebase-sync.js — סנכרון התקדמות לפי קוד פשוט (ללא התחברות Google) מול IndexedDB ('bagrut' / 'kv' / 'progress')
+// firebase-sync.js — סנכרון התקדמות לפי קוד פשוט (ללא Google) מול IndexedDB ('bagrut' / 'kv' / 'progress')
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
@@ -20,13 +20,13 @@ const db = getFirestore(app);
 const DB_NAME = "bagrut";
 const STORE_NAME = "kv";
 const PROGRESS_KEY = "progress";
-const CODE_STORAGE_KEY = "bagrut_sync_code";
+const CODE_KEY = "bagrut_sync_code";
 
-let currentCode = (localStorage.getItem(CODE_STORAGE_KEY) || "").trim().toUpperCase();
+let activeCode = (localStorage.getItem(CODE_KEY) || "").trim().toUpperCase();
 let unsub = null;
 let applyingRemote = false;
 let pushTimer = null;
-let lastSignature = "";
+let lastSig = "";
 
 function openDB() {
   return new Promise((res, rej) => {
@@ -37,7 +37,7 @@ function openDB() {
   });
 }
 
-async function readLocalProgress() {
+async function readProgress() {
   const database = await openDB();
   return new Promise((res, rej) => {
     const tx = database.transaction(STORE_NAME, "readonly");
@@ -47,7 +47,7 @@ async function readLocalProgress() {
   });
 }
 
-async function writeLocalProgress(map) {
+async function writeProgress(map) {
   const database = await openDB();
   return new Promise((res, rej) => {
     const tx = database.transaction(STORE_NAME, "readwrite");
@@ -57,122 +57,104 @@ async function writeLocalProgress(map) {
   });
 }
 
-// מחזיר מפה של { "exam|key": true } עבור כל השאלות שבוצעו
-function extractDone(progressMap) {
+function getDoneMap(progressMap) {
   const done = {};
-  for (const [id, val] of Object.entries(progressMap || {})) {
-    if (val && val.done) done[id] = true;
+  for (const [k, v] of Object.entries(progressMap || {})) {
+    if (v && v.done) done[k] = true;
   }
   return done;
 }
 
-// מאחד שאלות שבוצעו מכל צד (כך שמה שבוצע בחלקים השונים מצטבר ונשמר)
-function mergeDoneIntoProgress(doneUnion, existingMap) {
-  const next = { ...(existingMap || {}) };
-  for (const id of Object.keys(doneUnion || {})) {
-    if (doneUnion[id]) {
-      const prev = next[id] || { done: false, note: "", img: false, pdfPage: null };
-      next[id] = { ...prev, done: true };
+function mergeDone(doneUnion, baseMap) {
+  const next = { ...(baseMap || {}) };
+  for (const k of Object.keys(doneUnion || {})) {
+    if (doneUnion[k]) {
+      const prev = next[k] || { done: false, note: "", img: false, pdfPage: null };
+      next[k] = { ...prev, done: true };
     }
   }
   return next;
 }
 
-function signature(doneObj) {
-  return Object.keys(doneObj || {}).filter(k => doneObj[k]).sort().join("|");
-}
+const sigOf = obj => Object.keys(obj || {}).filter(k => obj[k]).sort().join("|");
 
-function syncUIState() {
-  if (typeof window.S !== "undefined") {
-    readLocalProgress().then(map => {
-      window.S.progress = map;
-      if (typeof window.refresh === "function") window.refresh();
-    });
-  } else if (typeof window.refresh === "function") {
-    window.refresh();
-  }
-}
-
-async function pushNow() {
-  if (!currentCode) return;
-  const localMap = await readLocalProgress();
-  const localDone = extractDone(localMap);
-  const ref = doc(db, "syncCodes", currentCode);
+async function syncPush() {
+  if (!activeCode) return;
+  const localMap = await readProgress();
+  const localDone = getDoneMap(localMap);
+  const ref = doc(db, "syncCodes", activeCode);
   const snap = await getDoc(ref);
   const cloudDone = snap.exists() ? (snap.data().done || {}) : {};
 
-  // איחוד מה שבוצע מקומית ובענן
-  const combinedDone = { ...cloudDone, ...localDone };
-  const mergedMap = mergeDoneIntoProgress(combinedDone, localMap);
+  // מאחד את מה שבוצע כך שהכמות מצטברת בין המכשירים
+  const unionDone = { ...cloudDone, ...localDone };
+  const mergedMap = mergeDone(unionDone, localMap);
 
-  if (signature(mergedMap) !== signature(localMap)) {
+  if (sigOf(getDoneMap(mergedMap)) !== sigOf(localDone)) {
     applyingRemote = true;
-    await writeLocalProgress(mergedMap);
-    if (typeof window.S !== "undefined") window.S.progress = mergedMap;
+    await writeProgress(mergedMap);
+    if (window.S) window.S.progress = mergedMap;
     applyingRemote = false;
-    syncUIState();
+    if (typeof window.refresh === "function") window.refresh();
   }
 
-  const sig = signature(combinedDone);
-  lastSignature = sig;
+  lastSig = sigOf(unionDone);
   await setDoc(ref, {
-    code: currentCode,
-    done: combinedDone,
-    doneCount: Object.keys(combinedDone).length,
+    code: activeCode,
+    done: unionDone,
+    doneCount: Object.keys(unionDone).length,
     updatedAt: serverTimestamp(),
   }, { merge: true });
 }
 
 function schedulePush() {
-  if (!currentCode || applyingRemote) return;
+  if (!activeCode || applyingRemote) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
-    pushNow().catch(err => console.warn("Sync push error:", err));
-  }, 600);
+    syncPush().catch(err => console.warn("syncPush:", err));
+  }, 500);
 }
 
-function connectCode(code) {
+function setCode(code) {
   const clean = (code || "").trim().toUpperCase();
   if (unsub) { unsub(); unsub = null; }
-  currentCode = clean;
-  if (clean) {
-    localStorage.setItem(CODE_STORAGE_KEY, clean);
-  } else {
-    localStorage.removeItem(CODE_STORAGE_KEY);
-    renderBadge();
+  activeCode = clean;
+
+  if (!clean) {
+    localStorage.removeItem(CODE_KEY);
+    renderCodeBtn();
     return;
   }
 
-  renderBadge();
-  const ref = doc(db, "syncCodes", clean);
-  pushNow().catch(() => {});
+  localStorage.setItem(CODE_KEY, clean);
+  renderCodeBtn();
+  syncPush().catch(() => {});
 
+  const ref = doc(db, "syncCodes", clean);
   unsub = onSnapshot(ref, async (snap) => {
     if (!snap.exists() || snap.metadata.hasPendingWrites) return;
     const cloudDone = snap.data().done || {};
-    const localMap = await readLocalProgress();
-    const localDone = extractDone(localMap);
-    const combined = { ...localDone, ...cloudDone };
-    const sig = signature(combined);
+    const localMap = await readProgress();
+    const localDone = getDoneMap(localMap);
+    const unionDone = { ...localDone, ...cloudDone };
+    const s = sigOf(unionDone);
 
-    if (sig === lastSignature && sig === signature(localDone)) return;
-    lastSignature = sig;
+    if (s === lastSig && s === sigOf(localDone)) return;
+    lastSig = s;
 
     applyingRemote = true;
-    const mergedMap = mergeDoneIntoProgress(combined, localMap);
-    await writeLocalProgress(mergedMap);
-    if (typeof window.S !== "undefined") window.S.progress = mergedMap;
+    const mergedMap = mergeDone(unionDone, localMap);
+    await writeProgress(mergedMap);
+    if (window.S) window.S.progress = mergedMap;
     applyingRemote = false;
 
-    if (typeof window.refresh === "function") {
-      window.refresh();
-    }
+    if (typeof window.refresh === "function") window.refresh();
 
-    if (signature(cloudDone) !== sig) {
+    if (sigOf(cloudDone) !== s) {
       await setDoc(ref, {
         code: clean,
-        done: combined,
-        doneCount: Object.keys(combined).length,
+        done: unionDone,
+        doneCount: Object.keys(unionDone).length,
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch(() => {});
     }
@@ -181,27 +163,23 @@ function connectCode(code) {
 
 window.addEventListener("bagrut-local-progress-changed", schedulePush);
 
-/* ===== כפתור חיבור עם קוד (בלי Google) ===== */
-const badge = document.createElement("div");
-badge.id = "bg-code-badge";
-badge.style.cssText = "position:fixed;bottom:14px;left:14px;z-index:9998;font:14px system-ui,sans-serif;direction:rtl";
-document.body.appendChild(badge);
+const wrap = document.createElement("div");
+wrap.id = "bg-code-sync";
+wrap.style.cssText = "position:fixed;bottom:14px;left:14px;z-index:9998;font:14px system-ui,sans-serif;direction:rtl";
+document.body.appendChild(wrap);
 
-function renderBadge() {
-  badge.innerHTML = "";
+function renderCodeBtn() {
+  wrap.innerHTML = "";
   const btn = document.createElement("button");
-  btn.style.cssText = "border:0;border-radius:20px;padding:9px 14px;background:#4F46E5;color:#fff;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)";
-  btn.textContent = currentCode ? `קוד: ${currentCode}` : "סנכרון בקוד";
+  btn.style.cssText = "border:0;border-radius:999px;padding:9px 14px;background:#4F46E5;color:#fff;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.28);font-weight:600";
+  btn.textContent = activeCode ? `קוד: ${activeCode}` : "חיבור עם קוד";
   btn.onclick = () => {
-    const val = prompt(
-      "הזן קוד סנכרון (אותו קוד בטלפון ובמחשב). השאר ריק לניתוק:",
-      currentCode || "571-"
-    );
-    if (val === null) return;
-    connectCode(val.trim().toUpperCase());
+    const input = prompt("הזן קוד סנכרון (למשל 571-TEST) כדי לסנכרן מה שבוצע בין מכשירים. השאר ריק לניתוק:", activeCode || "571-");
+    if (input === null) return;
+    setCode(input);
   };
-  badge.appendChild(btn);
+  wrap.appendChild(btn);
 }
 
-renderBadge();
-if (currentCode) connectCode(currentCode);
+renderCodeBtn();
+if (activeCode) setCode(activeCode);
