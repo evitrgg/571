@@ -1,4 +1,4 @@
-// firebase-sync.js — התחברות עם Google, סנכרון התקדמות בין מכשירים ופאנל מנהל נסתר.
+// firebase-sync.js — התחברות עם Google, סנכרון התקדמות (IndexedDB), ייצוא/ייבוא Excel של בגרויות ופאנל מנהל נסתר.
 // שימוש: <script type="module" src="firebase-sync.js"></script> (בסוף ה-body ב-index.html)
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -13,29 +13,68 @@ import {
 
 /* ====================== הגדרות — לשנות כאן ====================== */
 const CFG = {
-  // המפתח ב-localStorage שבו האפליקציה שומרת את ההתקדמות
-  storageKey: "REPLACE_ME",
-  // כמה שאלות יש בסך הכל (לחישוב אחוזים בייצוא). 0 = לא לחשב אחוז
-  totalQuestions: 0,
-  // האלמנט שלוחצים עליו 5 פעמים כדי לחשוף את כפתור המנהל
+  dbName: "bagrut",
+  storeName: "kv",
+  progressKey: "progress",
+  totalQuestions: typeof CATALOG !== "undefined"
+    ? CATALOG.reduce((sum, e) => sum + (e.keys ? e.keys.length : 0), 0)
+    : 0,
   adminTapTarget: "h1",
   adminTaps: 5,
 };
 
-// מתאמים: איך ההתקדמות נראית ב-localStorage.
-// ברירת מחדל: אובייקט JSON מהצורה { "questionId": true, ... }
-function toDone(raw) {
-  // raw = המחרוזת מ-localStorage  ->  { id: true }
-  try {
-    const obj = JSON.parse(raw || "{}");
-    const done = {};
-    for (const k in obj) if (obj[k]) done[k] = true;
-    return done;
-  } catch { return {}; }
+function openKV() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(CFG.dbName, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(CFG.storeName);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
 }
-function fromDone(done, rawOld) {
-  // { id: true } -> מחרוזת לשמירה ב-localStorage
-  return JSON.stringify(done);
+
+async function readProgressMap() {
+  const db = await openKV();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(CFG.storeName, "readonly");
+    const q = tx.objectStore(CFG.storeName).get(CFG.progressKey);
+    q.onsuccess = () => res(q.result && typeof q.result === "object" ? q.result : {});
+    q.onerror = () => rej(q.error);
+  });
+}
+
+async function writeProgressMap(map) {
+  const db = await openKV();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(CFG.storeName, "readwrite");
+    tx.objectStore(CFG.storeName).put(map, CFG.progressKey);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+// מתאמים: מפת ההתקדמות ב-IndexedDB ({ "exam|key": { done, note, img, pdfPage } }) <-> { "exam|key": true }
+function toDone(progressMap) {
+  const done = {};
+  for (const [k, v] of Object.entries(progressMap || {})) {
+    if (v && v.done) done[k] = true;
+  }
+  return done;
+}
+
+function fromDone(doneObj, existingMap = {}) {
+  const next = { ...existingMap };
+  for (const k of Object.keys(next)) {
+    if (!doneObj[k] && next[k]) {
+      next[k] = { ...next[k], done: false };
+    }
+  }
+  for (const k of Object.keys(doneObj || {})) {
+    if (doneObj[k]) {
+      const prev = next[k] || { note: "", img: false, pdfPage: null };
+      next[k] = { ...prev, done: true };
+    }
+  }
+  return next;
 }
 /* =============================================================== */
 
@@ -59,16 +98,12 @@ let unsub = null;
 let applyingRemote = false;
 let pushTimer = null;
 
-const rawSetItem = Storage.prototype.setItem;
-const readRaw = () => localStorage.getItem(CFG.storageKey);
 const sameDone = (a, b) => JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort());
 const userRef = () => doc(db, "users", user.uid);
 
-// כל שינוי של האפליקציה ב-localStorage מפעיל דחיפה לענן (בלי לשנות את קוד האפליקציה)
-Storage.prototype.setItem = function (k, v) {
-  rawSetItem.call(this, k, v);
-  if (this === localStorage && k === CFG.storageKey && !applyingRemote) schedulePush();
-};
+window.addEventListener("bagrut-local-progress-changed", () => {
+  if (!applyingRemote) schedulePush();
+});
 
 function schedulePush() {
   if (!user) return;
@@ -78,23 +113,32 @@ function schedulePush() {
 
 async function push() {
   if (!user) return;
-  const done = toDone(readRaw());
+  const map = await readProgressMap();
+  const done = toDone(map);
   try {
     await updateDoc(userRef(), { done, doneCount: Object.keys(done).length, lastSeen: serverTimestamp() });
   } catch (e) { console.warn("sync push failed", e); }
 }
 
-function applyRemote(done) {
+async function applyRemote(done) {
   applyingRemote = true;
-  rawSetItem.call(localStorage, CFG.storageKey, fromDone(done, readRaw()));
+  const current = await readProgressMap();
+  const nextMap = fromDone(done, current);
+  await writeProgressMap(nextMap);
+  if (typeof window.S !== "undefined") {
+    window.S.progress = nextMap;
+  }
   applyingRemote = false;
-  // אם האפליקציה מאזינה לאירוע ומבצעת preventDefault — היא מרעננת את עצמה.
-  // אחרת נרענן את הדף פעם אחת בלבד לכל סשן.
-  const ev = new CustomEvent("bagrut-progress-updated", { cancelable: true, detail: { done } });
-  const handled = !window.dispatchEvent(ev);
-  if (!handled && !sessionStorage.getItem("bagrut_reloaded")) {
-    sessionStorage.setItem("bagrut_reloaded", "1");
-    location.reload();
+
+  if (typeof window.refresh === "function") {
+    window.refresh();
+  } else {
+    const ev = new CustomEvent("bagrut-progress-updated", { cancelable: true, detail: { done, progress: nextMap } });
+    const handled = !window.dispatchEvent(ev);
+    if (!handled && !sessionStorage.getItem("bagrut_reloaded")) {
+      sessionStorage.setItem("bagrut_reloaded", "1");
+      location.reload();
+    }
   }
 }
 
@@ -113,19 +157,19 @@ async function ensureProfile(u) {
 function startSync() {
   if (unsub) unsub();
   const flag = "bagrut_synced_" + user.uid;
-  unsub = onSnapshot(userRef(), (snap) => {
+  unsub = onSnapshot(userRef(), async (snap) => {
     if (snap.metadata.hasPendingWrites || !snap.exists()) return;
     const cloud = snap.data().done || {};
-    const local = toDone(readRaw());
+    const localMap = await readProgressMap();
+    const local = toDone(localMap);
     if (!localStorage.getItem(flag)) {
-      // התחברות ראשונה במכשיר הזה: איחוד, כדי לא לאבד כלום
       const merged = { ...cloud, ...local };
-      rawSetItem.call(localStorage, flag, "1");
-      if (!sameDone(merged, local)) applyRemote(merged);
-      if (!sameDone(merged, cloud)) updateDoc(userRef(), { done: merged, doneCount: Object.keys(merged).length, lastSeen: serverTimestamp() });
+      localStorage.setItem(flag, "1");
+      if (!sameDone(merged, local)) await applyRemote(merged);
+      if (!sameDone(merged, cloud)) await updateDoc(userRef(), { done: merged, doneCount: Object.keys(merged).length, lastSeen: serverTimestamp() });
       return;
     }
-    if (!sameDone(cloud, local)) applyRemote(cloud);
+    if (!sameDone(cloud, local)) await applyRemote(cloud);
   });
 }
 
@@ -163,13 +207,69 @@ async function deleteAccount() {
   }
 }
 
+/* ====== ייצוא / ייבוא טבלת Excel (CSV) של הבגרויות בלבד ====== */
+async function exportBagrutOnlyCSV() {
+  const map = await readProgressMap();
+  const exams = typeof CATALOG !== "undefined" ? CATALOG.filter(e => e.source === "בגרויות") : [];
+  const rows = [["מזהה_מבחן", "שם_מבחן", "שאלה", "סטטוס", "הערה"]];
+  for (const e of exams) {
+    for (const k of (e.keys || [])) {
+      const item = map[e.id + "|" + k] || {};
+      rows.push([
+        e.id,
+        e.title || "",
+        k,
+        item.done ? "בוצע" : "לא בוצע",
+        item.note || ""
+      ]);
+    }
+  }
+  const csv = "\uFEFF" + rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = "bagrut-exams-progress.csv";
+  a.click();
+}
+
+function importBagrutOnlyCSV() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".csv,text/csv";
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    const text = (await file.text()).replace(/^\uFEFF/, "");
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const map = await readProgressMap();
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(",");
+      const clean = cols.map(c => c.replace(/^"|"$/g, "").replace(/""/g, '"').trim());
+      const [examId, , qKey, status, note] = clean;
+      if (!examId || !qKey) continue;
+      const id = examId + "|" + qKey;
+      const prev = map[id] || { done: false, note: "", img: false, pdfPage: null };
+      map[id] = {
+        ...prev,
+        done: status === "בוצע" || status === "כן" || status === "1" || status.toLowerCase() === "true",
+        note: note !== undefined ? note : prev.note
+      };
+    }
+    await applyRemote(toDone(map));
+    await writeProgressMap(map);
+    if (typeof window.S !== "undefined") window.S.progress = map;
+    if (typeof window.refresh === "function") window.refresh();
+    alert("הייבוא מקובץ ה-CSV הושלם.");
+  };
+  inp.click();
+}
+
 /* ============================ UI ============================ */
 const css = document.createElement("style");
 css.textContent = `
 #bg-badge{position:fixed;bottom:14px;left:14px;z-index:9998;font:14px system-ui,sans-serif;direction:rtl}
 #bg-badge button{border:0;border-radius:20px;padding:9px 14px;background:#2563eb;color:#fff;cursor:pointer;box-shadow:0 2px 8px #0003}
-#bg-panel{position:fixed;bottom:60px;left:14px;z-index:9998;background:#fff;color:#111;border-radius:12px;padding:12px;box-shadow:0 4px 20px #0004;direction:rtl;font:14px system-ui,sans-serif;display:flex;flex-direction:column;gap:8px;min-width:190px}
-#bg-panel button{border:1px solid #ddd;background:#f8f8f8;border-radius:8px;padding:8px;cursor:pointer}
+#bg-panel{position:fixed;bottom:60px;left:14px;z-index:9998;background:#fff;color:#111;border-radius:12px;padding:12px;box-shadow:0 4px 20px #0004;direction:rtl;font:14px system-ui,sans-serif;display:flex;flex-direction:column;gap:8px;min-width:210px}
+#bg-panel button{border:1px solid #ddd;background:#f8f8f8;border-radius:8px;padding:8px;cursor:pointer;text-align:right}
 #bg-admin{position:fixed;inset:0;z-index:9999;background:#fff;color:#111;overflow:auto;padding:16px;direction:rtl;font:14px system-ui,sans-serif}
 #bg-admin table{border-collapse:collapse;width:100%;margin-top:12px}
 #bg-admin th,#bg-admin td{border:1px solid #ddd;padding:6px 8px;text-align:right;white-space:nowrap}
@@ -207,17 +307,26 @@ function togglePanel() {
   mk("סנכרן עכשיו", push);
   mk("התנתק", () => signOut(auth));
   mk("מחק את החשבון שלי", deleteAccount);
+  if (adminRevealed) {
+    mk("📥 ייצוא Excel (בגרויות בלבד)", exportBagrutOnlyCSV);
+    mk("📤 ייבוא Excel (בגרויות בלבד)", importBagrutOnlyCSV);
+  }
   if (isAdmin && adminRevealed) mk("📊 פאנל מנהל", openAdmin);
   document.body.appendChild(panel);
 }
 
-// חשיפת כפתור המנהל: 5 לחיצות מהירות על הכותרת
+// חשיפת כלי הייצוא/ייבוא ופאנל המנהל: 5 לחיצות מהירות על הכותרת
 (function () {
   let taps = 0, t;
   document.addEventListener("click", (e) => {
     if (!e.target.closest || !e.target.closest(CFG.adminTapTarget)) return;
     taps++; clearTimeout(t); t = setTimeout(() => (taps = 0), 1500);
-    if (taps >= CFG.adminTaps) { taps = 0; if (isAdmin) { adminRevealed = true; togglePanel(); closePanel(); togglePanel(); } }
+    if (taps >= CFG.adminTaps) {
+      taps = 0;
+      adminRevealed = true;
+      if (user) { closePanel(); togglePanel(); }
+      else alert("כלי הייצוא והייבוא נחשפו. התחבר לחשבון כדי לפתוח את התפריט.");
+    }
   });
 })();
 
