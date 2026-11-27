@@ -22,6 +22,7 @@ const idb = new Promise((res, rej) => { const r = indexedDB.open('bagrut', 1); r
 const tx = (m, f) => idb.then(db => new Promise((res, rej) => { const t = db.transaction('kv', m); const q = f(t.objectStore('kv')); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }));
 const kv = { get: k => tx('readonly', s => s.get(k)), set: (k, v) => tx('readwrite', s => s.put(v, k)), del: k => tx('readwrite', s => s.delete(k)) };
 const S = { progress: {}, links: {}, shifts: {}, settings: { goolUrl: GOOL_URL, offset: 4 }, tab: 0 };
+window.S = S;
 const save = k => {
   if (k === 'progress') dispatchEvent(new Event('bagrut-local-progress-changed'));
   return kv.set(k, S[k]).catch(() => toast('השמירה נכשלה'));
@@ -43,7 +44,13 @@ const solutionFor = e => S.links[solKey(e)] || e.solutionUrl || null;
 const solSearch = e => 'https://www.google.com/search?q=' + encodeURIComponent('פתרון מלא מחוון שאלון 571 ' + e.title + ' בגרות מתמטיקה 5 יחידות');
 const openUrl = u => window.open(u, '_blank', 'noopener');
 function ensure(e, k) { const id = e + '|' + k; return S.progress[id] || (S.progress[id] = { done: false, note: '', img: false, pdfPage: null }); }
-function toggle(e, k) { const p = ensure(e, k); p.done = !p.done; p.ts = Date.now(); save('progress'); refresh(); if (navigator.vibrate) navigator.vibrate(8); }
+function toggle(e, k) {
+  const p = ensure(e, k);
+  p.done = !p.done; p.ts = Date.now();
+  save('progress'); refresh();
+  dispatchEvent(new CustomEvent('bagrut-toggle', { detail: { id: e + '|' + k } }));
+  if (navigator.vibrate) navigator.vibrate(8);
+}
 /* ---------- small UI helpers ---------- */
 const ring = (p, d, sw, col, track, inner) => { const r = (d - sw) / 2, c = 2 * Math.PI * r; return `<div class="ring" style="width:${d}px;height:${d}px"><svg width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${r}" fill="none" stroke="${track}" stroke-width="${sw}"/><circle cx="${d / 2}" cy="${d / 2}" r="${r}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${c * p / 100} ${c}"/></svg><span>${inner}</span></div>`; };
 const pbar = (p, col) => `<div class="pb"><i style="width:${p}%;background:${col}"></i></div>`;
