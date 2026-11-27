@@ -74,55 +74,76 @@ function getDoneMap(progressMap) {
   }
   return done;
 }
-
-function mergeDone(doneUnion, baseMap) {
+// ---- state = { key: { done: bool, ts: ms } } ; הרשומה העדכנית (ts) מנצחת ----
+function getStateMap(progressMap) {
+  const st = {};
+  for (const [k, v] of Object.entries(progressMap || {})) {
+    if (v && (v.done || v.ts)) st[k] = { done: !!v.done, ts: v.ts || 0 };
+  }
+  return st;
+}
+function readCloud(data) {
+  if (data.state) return data.state;
+  const st = {};                                   // תאימות לאחור לנתונים ישנים
+  for (const k of Object.keys(data.done || {})) if (data.done[k]) st[k] = { done: true, ts: 0 };
+  return st;
+}
+function mergeState(a, b) {
+  const out = { ...(a || {}) };
+  for (const [k, v] of Object.entries(b || {})) {
+    const o = out[k];
+    if (!o || v.ts > o.ts || (v.ts === o.ts && v.done && !o.done)) out[k] = v;
+  }
+  return out;
+}
+function applyState(state, baseMap) {
   const next = { ...(baseMap || {}) };
-  for (const k of Object.keys(doneUnion || {})) {
-    if (doneUnion[k]) {
-      const prev = next[k] || { done: false, note: "", img: false, pdfPage: null };
-      next[k] = { ...prev, done: true };
-    }
+  for (const [k, v] of Object.entries(state)) {
+    const prev = next[k] || { done: false, note: "", img: false, pdfPage: null };
+    next[k] = { ...prev, done: v.done, ts: v.ts };
   }
   return next;
 }
+const sigOf = st => Object.keys(st || {}).sort().map(k => k + ":" + (st[k].done ? 1 : 0) + ":" + st[k].ts).join("|");
+const countDone = st => Object.values(st).filter(v => v.done).length;
 
-const sigOf = obj => Object.keys(obj || {}).filter(k => obj[k]).sort().join("|");
+async function currentProgress() {
+  await (window.bagrutReady || Promise.resolve());
+  return (window.S && window.S.progress) || await readProgress();
+}
 
 function applyToUI(map) {
   if (window.S) window.S.progress = map;
   if (typeof window.refresh === "function") window.refresh();
 }
 
+async function reconcile(ref, code, localMap, localState, cloudState) {
+  const merged = mergeState(localState, cloudState);
+  const s = sigOf(merged);
+  if (s !== sigOf(localState)) {
+    applyingRemote = true;
+    try {
+      const m = applyState(merged, localMap);
+      await writeProgress(m);
+      applyToUI(m);
+    } finally { applyingRemote = false; }
+  }
+  if (s !== sigOf(cloudState)) {
+    await setDoc(ref, { code, state: merged, doneCount: countDone(merged), updatedAt: serverTimestamp() }, { merge: true });
+  }
+  return merged;
+}
+
 async function syncNow(showStatus = false) {
   if (!currentCode) return;
+  const code = currentCode;
   try {
-    const localMap = (window.S && window.S.progress) ? window.S.progress : await readProgress();
-    const localDone = getDoneMap(localMap);
-    const ref = doc(db, "syncCodes", currentCode);
+    const localMap = await currentProgress();
+    const ref = doc(db, "syncCodes", code);
     const snap = await getDoc(ref);
-    const cloudDone = snap.exists() ? (snap.data().done || {}) : {};
-
-    const unionDone = { ...cloudDone, ...localDone };
-    const mergedMap = mergeDone(unionDone, localMap);
-
-    applyingRemote = true;
-    await writeProgress(mergedMap);
-    applyToUI(mergedMap);
-    applyingRemote = false;
-
-    const s = sigOf(unionDone);
-    lastSig = s;
-
-    await setDoc(ref, {
-      code: currentCode,
-      done: unionDone,
-      doneCount: Object.keys(unionDone).length,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-
-    if (showStatus) {
-      notify(`מחובר לקוד ${currentCode} (${Object.keys(unionDone).length} שאלות)`);
-    }
+    const cloudState = snap.exists() ? readCloud(snap.data()) : {};
+    const merged = await reconcile(ref, code, localMap, getStateMap(localMap), cloudState);
+    if (showStatus) notify(`מחובר לקוד ${code} (${countDone(merged)} שאלות)`);
   } catch (err) {
     console.warn("syncNow failed:", err);
     if (showStatus) notify("שגיאה בחיבור לסנכרון — בדוק חיבור וכללי Firestore");
@@ -136,7 +157,6 @@ function connectCode(rawCode, showStatus = false) {
 
   if (!clean) {
     localStorage.removeItem(CODE_KEY);
-    lastSig = "";
     if (showStatus) notify("הסנכרון בקוד נותק");
     return;
   }
@@ -147,35 +167,24 @@ function connectCode(rawCode, showStatus = false) {
   const ref = doc(db, "syncCodes", clean);
   unsub = onSnapshot(ref, async (snap) => {
     if (!snap.exists() || snap.metadata.hasPendingWrites) return;
-    const cloudDone = snap.data().done || {};
-    const localMap = (window.S && window.S.progress) ? window.S.progress : await readProgress();
-    const localDone = getDoneMap(localMap);
-    const unionDone = { ...localDone, ...cloudDone };
-    const s = sigOf(unionDone);
-
-    if (s === lastSig && sigOf(cloudDone) === lastSig) return;
-    lastSig = s;
-
-    applyingRemote = true;
-    const mergedMap = mergeDone(unionDone, localMap);
-    await writeProgress(mergedMap);
-    applyToUI(mergedMap);
-    applyingRemote = false;
-
-    if (sigOf(cloudDone) !== s) {
-      await setDoc(ref, {
-        code: clean,
-        done: unionDone,
-        doneCount: Object.keys(unionDone).length,
-        updatedAt: serverTimestamp(),
-      }, { merge: true }).catch(() => {});
-    }
-  }, (err) => {
-    console.warn("onSnapshot error:", err);
-  });
+    try {
+      const localMap = await currentProgress();
+      await reconcile(ref, clean, localMap, getStateMap(localMap), readCloud(snap.data()));
+    } catch (e) { console.warn("snapshot sync failed:", e); }
+  }, (err) => console.warn("onSnapshot error:", err));
 }
 
+let syncTimer;
 window.addEventListener("bagrut-local-progress-changed", () => {
+  if (!currentCode || applyingRemote) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow(false), 400);
+});
+
+window.addEventListener("bagrut-set-sync-code", (e) => connectCode(e.detail || "", true));
+window.getBagrutSyncCode = () => currentCode;
+
+if (currentCode) connectCode(currentCode, false);
   if (!currentCode || applyingRemote) return;
   syncNow(false);
 });
