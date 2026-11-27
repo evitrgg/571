@@ -1,30 +1,39 @@
 @media (min-width: 768px) {
   body {
     background: var(--sv);
-    display: flex;
-    justify-content: center;
+    margin: 0;
+    overflow: hidden;
   }
 
+  /* מבטל את הכליאה ל-980px ומאפשר למסכים פנימיים ולתרגילים לנצל את כל רוחב המסך */
   #root {
-    position: relative;
-    width: 100%;
-    max-width: 1040px;
+    position: fixed;
+    inset: 0;
+    width: 100vw;
     height: 100vh;
-    margin: 0 auto;
-    box-shadow: 0 8px 36px rgba(0, 0, 0, 0.14);
-    border-inline: 1px solid var(--outv);
+    max-width: none;
+    margin: 0;
+    box-shadow: none;
+    border: 0;
     background: var(--bg);
   }
 
-  /* ברירת מחדל לכל מסכי הגלילה (מבחן, סוג שאלה): עמודה אחת רחבה וברורה */
+  .layer {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* מסכי רשימות (בית, סוג שאלה, מבחן) ממורכזים לרוחב קריאה נוח */
   .scroll {
-    padding: 20px 32px 44px;
+    width: 100%;
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 20px 28px 48px;
     gap: 12px;
     display: flex;
     flex-direction: column;
   }
 
-  /* רק במסך הבית (השכבה הראשונה ללא анимаציה): רשת של 2 עמודות לכרטיסים */
   #root > .layer:first-child .scroll {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -40,32 +49,24 @@
   }
 
   .hero {
-    margin: -20px -32px 6px;
-    padding: 26px 32px;
-    border-radius: 0 0 32px 32px;
-  }
-
-  .hero h1 {
-    font-size: 26px;
+    margin: -20px -28px 6px;
+    padding: 24px 32px;
+    border-radius: 0 0 28px 28px;
   }
 
   .bar {
-    padding: 12px 20px;
+    padding: 10px 20px;
     border-bottom: 1px solid var(--outv);
   }
 
-  .bar h1 {
-    font-size: 18px;
-  }
-
   .pills {
-    padding: 10px 24px 6px;
+    padding: 8px 20px;
     justify-content: center;
     flex-wrap: wrap;
   }
 
   .card {
-    padding: 16px 20px;
+    padding: 15px 18px;
     transition: transform 0.14s ease, box-shadow 0.14s ease;
   }
 
@@ -74,47 +75,52 @@
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   }
 
-  /* תצוגת תרגיל (PDF Viewer) — מקסימום שטח קריאה במחשב */
+  /* תצוגת תרגיל (PDF) — תופסת כמעט את כל גובה המסך בלי חיתוך לחצי דף */
   .stage {
-    padding: 12px 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    padding: 8px 16px;
     margin-top: 0 !important;
   }
 
   .stage canvas {
     width: auto !important;
     height: auto !important;
-    max-width: 100%;
-    max-height: calc(100vh - 190px);
+    max-width: 96vw;
+    max-height: calc(100vh - 155px);
+    object-fit: contain;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
     border-radius: 8px;
   }
 
   .hint {
     text-align: center;
-    padding: 4px 24px;
+    padding: 2px 16px;
   }
 
   .vctl {
-    max-width: 720px;
+    max-width: 780px;
     width: 100%;
     margin: 0 auto;
-    padding: 8px 24px;
+    padding: 6px 16px;
   }
 
   .vfoot {
-    max-width: 720px;
+    max-width: 780px;
     width: 100%;
     margin: 0 auto;
-    padding: 4px 24px 16px;
+    padding: 4px 16px 12px;
   }
 
   .dlg {
-    max-width: 500px;
+    max-width: 520px;
     width: 100%;
     margin: auto;
   }
 
   .sheet {
-    max-width: 680px;
+    max-width: 700px;
     width: 100%;
     margin: 0 auto;
   }
