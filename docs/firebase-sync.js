@@ -1,4 +1,4 @@
-// firebase-sync.js — סנכרון התקדמות לפי קוד פשוט (ללא Google) מול IndexedDB ('bagrut' / 'kv' / 'progress')
+// firebase-sync.js — סנכרון לייב מיידי לפי קוד (למחשב ולטלפון), מתוך ההגדרות
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
@@ -25,7 +25,6 @@ const CODE_KEY = "bagrut_sync_code";
 let activeCode = (localStorage.getItem(CODE_KEY) || "").trim().toUpperCase();
 let unsub = null;
 let applyingRemote = false;
-let pushTimer = null;
 let lastSig = "";
 
 function openDB() {
@@ -78,27 +77,35 @@ function mergeDone(doneUnion, baseMap) {
 
 const sigOf = obj => Object.keys(obj || {}).filter(k => obj[k]).sort().join("|");
 
-async function syncPush() {
+function applyMapToApp(map) {
+  if (window.S) {
+    window.S.progress = map;
+  }
+  if (typeof window.refresh === "function") {
+    window.refresh();
+  }
+}
+
+async function syncNow() {
   if (!activeCode) return;
-  const localMap = await readProgress();
+  const localMap = (window.S && window.S.progress) ? window.S.progress : await readProgress();
   const localDone = getDoneMap(localMap);
   const ref = doc(db, "syncCodes", activeCode);
   const snap = await getDoc(ref);
   const cloudDone = snap.exists() ? (snap.data().done || {}) : {};
 
-  // מאחד את מה שבוצע כך שהכמות מצטברת בין המכשירים
+  // מאחד את השאלות שבוצעו מכל מכשיר כדי להוסיף לכמות הקיימת
   const unionDone = { ...cloudDone, ...localDone };
   const mergedMap = mergeDone(unionDone, localMap);
 
-  if (sigOf(getDoneMap(mergedMap)) !== sigOf(localDone)) {
-    applyingRemote = true;
-    await writeProgress(mergedMap);
-    if (window.S) window.S.progress = mergedMap;
-    applyingRemote = false;
-    if (typeof window.refresh === "function") window.refresh();
-  }
+  applyingRemote = true;
+  await writeProgress(mergedMap);
+  applyMapToApp(mergedMap);
+  applyingRemote = false;
 
-  lastSig = sigOf(unionDone);
+  const s = sigOf(unionDone);
+  lastSig = s;
+
   await setDoc(ref, {
     code: activeCode,
     done: unionDone,
@@ -107,48 +114,39 @@ async function syncPush() {
   }, { merge: true });
 }
 
-function schedulePush() {
-  if (!activeCode || applyingRemote) return;
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    syncPush().catch(err => console.warn("syncPush:", err));
-  }, 500);
-}
-
-function setCode(code) {
+function connectCode(code) {
   const clean = (code || "").trim().toUpperCase();
   if (unsub) { unsub(); unsub = null; }
   activeCode = clean;
 
   if (!clean) {
     localStorage.removeItem(CODE_KEY);
-    renderCodeBtn();
+    lastSig = "";
     return;
   }
 
   localStorage.setItem(CODE_KEY, clean);
-  renderCodeBtn();
-  syncPush().catch(() => {});
+
+  // סנכרון מיידי ברגע שמחברים קוד
+  syncNow().catch(err => console.warn("Immediate sync error:", err));
 
   const ref = doc(db, "syncCodes", clean);
   unsub = onSnapshot(ref, async (snap) => {
     if (!snap.exists() || snap.metadata.hasPendingWrites) return;
     const cloudDone = snap.data().done || {};
-    const localMap = await readProgress();
+    const localMap = (window.S && window.S.progress) ? window.S.progress : await readProgress();
     const localDone = getDoneMap(localMap);
     const unionDone = { ...localDone, ...cloudDone };
     const s = sigOf(unionDone);
 
-    if (s === lastSig && s === sigOf(localDone)) return;
+    if (s === lastSig && sigOf(cloudDone) === lastSig) return;
     lastSig = s;
 
     applyingRemote = true;
     const mergedMap = mergeDone(unionDone, localMap);
     await writeProgress(mergedMap);
-    if (window.S) window.S.progress = mergedMap;
+    applyMapToApp(mergedMap);
     applyingRemote = false;
-
-    if (typeof window.refresh === "function") window.refresh();
 
     if (sigOf(cloudDone) !== s) {
       await setDoc(ref, {
@@ -161,25 +159,19 @@ function setCode(code) {
   });
 }
 
-window.addEventListener("bagrut-local-progress-changed", schedulePush);
+// דחיפה מיידית כשמסמנים/מבטלים שאלה באפליקציה
+window.addEventListener("bagrut-local-progress-changed", () => {
+  if (!activeCode || applyingRemote) return;
+  syncNow().catch(err => console.warn("Push change error:", err));
+});
 
-const wrap = document.createElement("div");
-wrap.id = "bg-code-sync";
-wrap.style.cssText = "position:fixed;bottom:14px;left:14px;z-index:9998;font:14px system-ui,sans-serif;direction:rtl";
-document.body.appendChild(wrap);
+// האזנה לקוד שמוזן מתוך ההגדרות (במחשב ובטלפון)
+window.addEventListener("bagrut-set-sync-code", (e) => {
+  connectCode(e.detail || "");
+});
 
-function renderCodeBtn() {
-  wrap.innerHTML = "";
-  const btn = document.createElement("button");
-  btn.style.cssText = "border:0;border-radius:999px;padding:9px 14px;background:#4F46E5;color:#fff;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.28);font-weight:600";
-  btn.textContent = activeCode ? `קוד: ${activeCode}` : "חיבור עם קוד";
-  btn.onclick = () => {
-    const input = prompt("הזן קוד סנכרון (למשל 571-TEST) כדי לסנכרן מה שבוצע בין מכשירים. השאר ריק לניתוק:", activeCode || "571-");
-    if (input === null) return;
-    setCode(input);
-  };
-  wrap.appendChild(btn);
+window.getBagrutSyncCode = () => activeCode;
+
+if (activeCode) {
+  connectCode(activeCode);
 }
-
-renderCodeBtn();
-if (activeCode) setCode(activeCode);
