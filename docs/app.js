@@ -461,17 +461,28 @@ function zoomImg(id) {
     el.innerHTML = `<button class="x" data-a="back">סגור</button><img src="${u}" alt="">`; zoomable(el, () => $('img', el), 6);
   }, { refresh() { } });
 }
-
-vPrev: () => vStep(-1), vNext: () => vStep(1),
-  vCrop: () => { const L = viewer_(); L.V.crop = !L.V.crop; L.ui(); L.load(); },
-  vSave: () => { const L = viewer_(); savePage(L.exam, L.V.key, L.V.page, L.ref); },
-  vDone: () => { const L = viewer_(); toggle(L.exam.id, L.V.key); },
-  vDet: () => { const L = viewer_(); details(L.exam, L.V.key); },
-  vSol: () => { const e = viewer_().exam; openUrl(solutionFor(e) || solSearch(e)); },
-  vRetry: () => { const L = viewer_(); L.V.err = null; L.V.doc = null; L.V.opening = false; L.load(); },
-  vPick: () => { const L = viewer_(); pickFile('application/pdf,.pdf', async f => { await storePdf(pdfUrl(L.ref), f); A.vRetry(); }); },
-  vWeb: () => openUrl(new URL(pdfUrl(viewer_().ref), location.href).href),
-  vJump: () => { const L = viewer_(), V = L.V; const shown = V.showAns ? V.aPage : V.page;
+/* ---------- ACTIONS ---------- */
+const A = {
+  back: () => history.back(),
+  install: () => installApp(),
+  noinst: () => { localStorage.setItem('noInstall', '1'); refresh(); },
+  settings: () => settingsDialog(),
+  tab: d => { S.tab = +d.v; localStorage.setItem('tab', S.tab); homeRender(); },
+  type: d => typeScreen(d.k, d.s),
+  exam: d => examScreen(EX[d.e]),
+  rem: (d, ev) => { ev.stopPropagation(); remainingSheet(EX[d.e]); },
+  pickRem: d => { history.back(); setTimeout(() => openQ(EX[d.e], d.k), 80); },
+  tsub: d => { const L = topL(); L.sub = d.v; L.render(); },
+  tf: d => { const L = topL(); L.f = +d.v; L.render(); },
+  ef: d => { const L = topL(); L.left = d.v === '1'; L.render(); },
+  q: d => openQ(EX[d.e], d.k),
+  tog: (d, ev) => { ev.stopPropagation(); toggle(d.e, d.k); },
+  link: () => { const e = topL().exam; openUrl(S.links[e.id] || e.defaultUrl || solSearch(e)); },
+  sol: () => { const e = topL().exam; openUrl(solutionFor(e) || solSearch(e)); },
+  editLinks: () => editLinks(topL().exam),
+  /* viewer */
+  vAns: () => { const L = viewer_(); L.V.showAns = !L.V.showAns; L.ui(); L.load(); },
+  vKey: d => { const L = viewer_(); L.V.showAns = false; L.setKey(d.v); L.ui(); L.load(); },
     dialog('מעבר לעמוד', `<label class="fld">${L.ref.url == null ? 'מספר העמוד המודפס' : 'מספר עמוד'}<input id="jp" class="h" inputmode="numeric" value="${shown}"></label>`, [['עבור', el => {
       const n = parseInt($('#jp', el).value); if (!isNaN(n)) { if (V.showAns && L.ansLo != null) V.aPage = Math.min(L.ansHi, Math.max(L.ansLo, n)); else { const t = V.doc ? V.doc.numPages - L.lim().sh : Infinity; V.page = Math.min(t, Math.max(1, n)); syncQuestionByPage(L); } }
       setTimeout(() => { L.ui(); L.load(); }, 0);
