@@ -1,27 +1,121 @@
-/* להוסיף ל-CSS של האתר. לשנות את #app לעוטף הראשי שלך. */
-html { -webkit-text-size-adjust: 100%; }
-
-#app, body > main {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
-}
-
-@media (min-width: 900px) {
-  body { background: #f3f4f6; }
-  #app, body > main {
-    background: #fff;
-    min-height: 100vh;
-    box-shadow: 0 0 24px #0001;
-    padding: 24px 32px;
+@media (min-width: 768px) {
+  body {
+    background: var(--sv);
+    display: flex;
+    justify-content: center;
   }
-  /* רשימות ארוכות בשתי עמודות במחשב */
-  .exam-list, .question-list {
+
+  #root {
+    position: relative;
+    width: 100%;
+    max-width: 1040px;
+    height: 100vh;
+    margin: 0 auto;
+    box-shadow: 0 8px 36px rgba(0, 0, 0, 0.14);
+    border-inline: 1px solid var(--outv);
+    background: var(--bg);
+  }
+
+  /* ברירת מחדל לכל מסכי הגלילה (מבחן, סוג שאלה): עמודה אחת רחבה וברורה */
+  .scroll {
+    padding: 20px 32px 44px;
+    gap: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* רק במסך הבית (השכבה הראשונה ללא анимаציה): רשת של 2 עמודות לכרטיסים */
+  #root > .layer:first-child .scroll {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    align-content: start;
+    gap: 14px;
   }
-  /* צופה ה-PDF לא יוצא מהעמוד */
-  iframe, embed, .pdf-viewer { max-width: 100%; height: 85vh; }
-  button, a { cursor: pointer; }
+
+  #root > .layer:first-child .scroll > .hero,
+  #root > .layer:first-child .scroll > .install,
+  #root > .layer:first-child .scroll > .seg,
+  #root > .layer:first-child .scroll > div:not(.card) {
+    grid-column: 1 / -1;
+  }
+
+  .hero {
+    margin: -20px -32px 6px;
+    padding: 26px 32px;
+    border-radius: 0 0 32px 32px;
+  }
+
+  .hero h1 {
+    font-size: 26px;
+  }
+
+  .bar {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--outv);
+  }
+
+  .bar h1 {
+    font-size: 18px;
+  }
+
+  .pills {
+    padding: 10px 24px 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .card {
+    padding: 16px 20px;
+    transition: transform 0.14s ease, box-shadow 0.14s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  }
+
+  /* תצוגת תרגיל (PDF Viewer) — מקסימום שטח קריאה במחשב */
+  .stage {
+    padding: 12px 24px;
+    margin-top: 0 !important;
+  }
+
+  .stage canvas {
+    width: auto !important;
+    height: auto !important;
+    max-width: 100%;
+    max-height: calc(100vh - 190px);
+    border-radius: 8px;
+  }
+
+  .hint {
+    text-align: center;
+    padding: 4px 24px;
+  }
+
+  .vctl {
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 8px 24px;
+  }
+
+  .vfoot {
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 4px 24px 16px;
+  }
+
+  .dlg {
+    max-width: 500px;
+    width: 100%;
+    margin: auto;
+  }
+
+  .sheet {
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+  }
 }
