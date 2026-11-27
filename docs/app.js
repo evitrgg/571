@@ -154,27 +154,113 @@ function settingsDialog() {
     });
 }
 
-function zoomable(stage, getEl, max) {
-  const pts = new Map(); const Z = { s: 1, x: 0, y: 0 }; let g = null, lastTap = 0;
-  const apply = () => { const el = getEl(); if (el) el.style.transform = `translate(${Z.x}px,${Z.y}px) scale(${Z.s})`; };
-  const info = () => { const a = [...pts.values()]; const cx = a.reduce((m, p) => m + p.x, 0) / a.length, cy = a.reduce((m, p) => m + p.y, 0) / a.length; const d = a.length > 1 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; return { cx, cy, d }; };
-  stage.addEventListener('pointerdown', ev => { if (ev.target.closest('button')) return; stage.setPointerCapture(ev.pointerId); pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY }); const i = info(); g = { ...i, s: Z.s, moved: 0, t: Date.now(), n: pts.size }; });
+function zoomable(stage, getEl, max = 4) {
+  const pts = new Map();
+  const Z = { s: 1, x: 0, y: 0 };
+  let start = null, lastTap = 0;
+
+  const clamp = () => {
+    if (Z.s <= 1) {
+      Z.s = 1;
+      Z.x = 0;
+      Z.y = 0;
+      return;
+    }
+    const el = getEl();
+    const sr = stage.getBoundingClientRect();
+    const bw = (el ? el.offsetWidth : sr.width) * Z.s;
+    const bh = (el ? el.offsetHeight : sr.height) * Z.s;
+    const maxX = Math.max(0, (bw - sr.width) / 2 + 40);
+    const maxY = Math.max(0, (bh - sr.height) / 2 + 40);
+    Z.x = Math.max(-maxX, Math.min(maxX, Z.x));
+    Z.y = Math.max(-maxY, Math.min(maxY, Z.y));
+  };
+
+  const apply = () => {
+    clamp();
+    const el = getEl();
+    if (el) {
+      el.style.transformOrigin = 'center center';
+      el.style.transform = `translate3d(${Z.x}px, ${Z.y}px, 0) scale(${Z.s})`;
+    }
+  };
+
+  const geom = () => {
+    const arr = [...pts.values()];
+    const cx = arr.reduce((sum, p) => sum + p.x, 0) / arr.length;
+    const cy = arr.reduce((sum, p) => sum + p.y, 0) / arr.length;
+    const dist = arr.length > 1 ? Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) : 0;
+    return { cx, cy, dist };
+  };
+
+  stage.addEventListener('pointerdown', ev => {
+    if (ev.target.closest('button')) return;
+    pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    const g = geom();
+    start = {
+      ...g,
+      s: Z.s,
+      ox: Z.x,
+      oy: Z.y,
+      moved: 0,
+      t: Date.now(),
+      n: pts.size
+    };
+  });
+
   stage.addEventListener('pointermove', ev => {
-    if (!pts.has(ev.pointerId) || !g) return; pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-    const i = info(); g.moved += Math.abs(i.cx - g.cx) + Math.abs(i.cy - g.cy);
-    if (pts.size > 1 && g.d) Z.s = Math.min(max, Math.max(1, Z.s * i.d / g.d));
-    Z.x += i.cx - g.cx; Z.y += i.cy - g.cy; g.cx = i.cx; g.cy = i.cy;
-    if (Z.s === 1) { Z.x = 0; Z.y = 0; } else { const el = getEl(); const w = (el ? el.clientWidth : 300) * Z.s / 2, h = (el ? el.clientHeight : 300) * Z.s / 2; Z.x = Math.max(-w, Math.min(w, Z.x)); Z.y = Math.max(-h, Math.min(h, Z.y)); }
+    if (!pts.has(ev.pointerId) || !start) return;
+    pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    const g = geom();
+    start.moved += Math.hypot(g.cx - start.cx, g.cy - start.cy);
+
+    if (pts.size >= 2 && start.dist > 10) {
+      Z.s = Math.min(max, Math.max(1, start.s * (g.dist / start.dist)));
+      Z.x = start.ox + (g.cx - start.cx);
+      Z.y = start.oy + (g.cy - start.cy);
+    } else if (pts.size === 1 && Z.s > 1) {
+      Z.x = start.ox + (g.cx - start.cx);
+      Z.y = start.oy + (g.cy - start.cy);
+    }
     apply();
   });
-  const up = ev => {
-    if (!pts.has(ev.pointerId)) return; pts.delete(ev.pointerId);
-    if (g && g.n === 1 && g.moved < 8 && Date.now() - g.t < 300) { const n = Date.now(); if (n - lastTap < 320) { if (Z.s > 1) { Z.s = 1; Z.x = Z.y = 0; } else Z.s = Math.min(max, 2.5); apply(); lastTap = 0; } else lastTap = n; }
-    if (pts.size) { const i = info(); g = { ...i, s: Z.s, moved: 99, t: 0, n: pts.size }; } else g = null;
+
+  const endPtr = ev => {
+    if (!pts.has(ev.pointerId)) return;
+    pts.delete(ev.pointerId);
+    if (start && start.n === 1 && start.moved < 10 && Date.now() - start.t < 300) {
+      const now = Date.now();
+      if (now - lastTap < 320) {
+        if (Z.s > 1) { Z.s = 1; Z.x = 0; Z.y = 0; }
+        else { Z.s = Math.min(max, 2.2); }
+        apply();
+        lastTap = 0;
+      } else {
+        lastTap = now;
+      }
+    }
+    if (pts.size > 0) {
+      const g = geom();
+      start = { ...g, s: Z.s, ox: Z.x, oy: Z.y, moved: 20, t: 0, n: pts.size };
+    } else {
+      start = null;
+    }
   };
-  stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
-  return { reset() { Z.s = 1; Z.x = Z.y = 0; apply(); } };
+
+  stage.addEventListener('pointerup', endPtr);
+  stage.addEventListener('pointercancel', endPtr);
+
+  return {
+    reset() {
+      Z.s = 1;
+      Z.x = 0;
+      Z.y = 0;
+      apply();
+    }
+  };
 }
+
+
 function installApp() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; refresh(); } }
 async function exportBackup() {
   const images = {};
