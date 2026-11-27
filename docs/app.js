@@ -119,7 +119,6 @@ function remainingSheet(e) {
 }
 
 /* ---------- settings ---------- */
-/* ---------- settings (כולל סנכרון קוד לייב למחשב ולטלפון) ---------- */
 function settingsDialog() {
   const s = S.settings;
   const curCode = (typeof window.getBagrutSyncCode === 'function' ? window.getBagrutSyncCode() : localStorage.getItem('bagrut_sync_code')) || '';
@@ -134,7 +133,7 @@ function settingsDialog() {
     refresh();
   };
   dialog('הגדרות ו-PDF', `
-  <label class="fld">קוד סנכרון בין מכשירים (למשל 571-ABCD)<input id="scode" value="${esc(curCode)}" placeholder="השאר ריק לניתוק"></label>
+  <label class="fld">קוד סנכרון (למשל 571-ABCD)<input id="scode" value="${esc(curCode)}" placeholder="השאר ריק לניתוק"></label>
   <label class="fld">קישור ל-PDF של שאלון 571<textarea id="su" rows="3" style="min-height:70px;direction:ltr;text-align:left">${esc(s.goolUrl)}</textarea></label>
   <label class="fld">דפים לפני עמוד מס' 1 (כריכה + מבוא + תוכן = 4)<input id="so" class="h" inputmode="numeric" value="${s.offset}"></label>
   <div class="acts" style="flex-direction:column;align-items:stretch">
@@ -146,7 +145,6 @@ function settingsDialog() {
       if (codeEl) {
         codeEl.onchange = () => {
           window.dispatchEvent(new CustomEvent('bagrut-set-sync-code', { detail: codeEl.value.trim().toUpperCase() }));
-          toast('הקוד סונכרן');
         };
       }
       $('#sre', el).onclick = async () => { applySet(el); docs.delete(S.settings.goolUrl); await kv.del('pdf:' + S.settings.goolUrl); history.back(); toast('הקובץ יורד מחדש בפתיחת שאלה'); };
@@ -156,7 +154,6 @@ function settingsDialog() {
     });
 }
 
-/* ---------- pinch / pan / wheel / double-tap ---------- */
 function zoomable(stage, getEl, max) {
   const pts = new Map(); const Z = { s: 1, x: 0, y: 0 }; let g = null, lastTap = 0;
   const apply = () => { const el = getEl(); if (el) el.style.transform = `translate(${Z.x}px,${Z.y}px) scale(${Z.s})`; };
@@ -170,13 +167,6 @@ function zoomable(stage, getEl, max) {
     if (Z.s === 1) { Z.x = 0; Z.y = 0; } else { const el = getEl(); const w = (el ? el.clientWidth : 300) * Z.s / 2, h = (el ? el.clientHeight : 300) * Z.s / 2; Z.x = Math.max(-w, Math.min(w, Z.x)); Z.y = Math.max(-h, Math.min(h, Z.y)); }
     apply();
   });
-  stage.addEventListener('wheel', ev => {
-    ev.preventDefault();
-    const step = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-    Z.s = Math.min(max, Math.max(1, Z.s * step));
-    if (Z.s === 1) { Z.x = 0; Z.y = 0; }
-    apply();
-  }, { passive: false });
   const up = ev => {
     if (!pts.has(ev.pointerId)) return; pts.delete(ev.pointerId);
     if (g && g.n === 1 && g.moved < 8 && Date.now() - g.t < 300) { const n = Date.now(); if (n - lastTap < 320) { if (Z.s > 1) { Z.s = 1; Z.x = Z.y = 0; } else Z.s = Math.min(max, 2.5); apply(); lastTap = 0; } else lastTap = n; }
